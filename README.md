@@ -8,7 +8,7 @@ ida2pwntools 是一款IDA 7.0上的插件，用于远程连接pwntools启动的�
 在IDA中 加载elf文件后会在最右侧显示ida2pwntools菜单表示安装成功。
 
 # 使用
-- IDA 中配置好远端服务器地址（Debugger->Process options->Hostname/Port
+- IDA 中配置好远端服务器地址（Debugger->Process options->Hostname/Port）
 - 在远端服务器启动IDA提供的linux_server / linux_server64 等
 - 在ida2pwntools菜单中，点击connect to pwntools，插件会等待同名程序启动
 ![image](https://github.com/anic/ida2pwntools/blob/master/screenshot/2start_plugin.png?raw=true)

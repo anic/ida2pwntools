@@ -137,6 +137,40 @@ def prepare_debug_ui():
 		ida_dbg.continue_process()
 	else:
 		idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
+
+def prepare_debug_noui():
+	global target_id
+	target_id = -1
+		
+	idaapi.msg("[%s] waiting...\n" % (PLUGNAME))
+	
+	#获取程序名称
+	filename = ida_nalt.get_input_file_path()
+	#or use ida_nalt.get_root_filename()
+	
+	#获取当前进程列表
+	pis = ida_idd.procinfo_vec_t()
+	cnt = ida_dbg.get_processes(pis)
+	for i in range(cnt):
+		proc = pis[i]
+		proc_name = proc.name.split(" ")[1]
+		idx = proc_name.rfind("/")
+		if idx!=-1:
+			proc_name = proc_name[idx+1:]
+		
+		if filename == proc_name:
+			target_id = proc.pid
+			break
+	
+	#开始调试
+	if (target_id != -1):
+		idaapi.msg("[%s] start debug\n" % (PLUGNAME))
+		ida_dbg.attach_process(target_id,-1)
+		GetDebuggerEvent(WFNE_SUSP, -1)
+		#继续调试
+		ida_dbg.continue_process()
+	else:
+		idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
 		
 class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 	comment = ""
@@ -152,13 +186,13 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 		menu_bar = next(i for i in QtWidgets.qApp.allWidgets() if isinstance(i, QtWidgets.QMenuBar))
 		menu = menu_bar.addMenu(PLUGNAME)
 		menu.addAction("Connect to pwntools").triggered.connect(prepare_debug_ui)
-	
+		return idaapi.PLUGIN_KEEP
 
 	def term(self):
 		idaapi.msg("[%s] terminated" % (PLUGNAME))
 	
 	def run(self, arg):
-		pass
+		prepare_debug_noui()
 				
 # register IDA plugin
 def PLUGIN_ENTRY():

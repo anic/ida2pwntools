@@ -28,6 +28,7 @@ wait_for_debugger(io.pid)
 - 方法2 ：用窗口尝试等待加载
 
 在IDA中的ida2pwntools菜单，点击“connect to pwntools”，插件弹出等待窗口等待同名程序启动。然后启动exp.py，运行至wait_for_debugger，程序自动会被挂载上。
+
 ![image](https://github.com/anic/ida2pwntools/blob/master/screenshot/2start_plugin.png?raw=true)
 
 ![image](https://github.com/anic/ida2pwntools/blob/master/screenshot/1wait_for_debugger.png?raw=true)

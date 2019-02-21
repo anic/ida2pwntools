@@ -54,7 +54,6 @@ class WaitThread(QThread):
 				ida_kernwin.MFF_FAST)
 
 			for proc in self.pis:
-				print proc.name
 				proc_name = proc.name.split(" ")[1]
 				idx = proc_name.rfind("/")
 

@@ -164,13 +164,14 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 
 	def init(self):
 		menu_bar = next(i for i in QtWidgets.qApp.allWidgets() if isinstance(i, QtWidgets.QMenuBar))
-		menu = menu_bar.addMenu(PLUGNAME)
-		menu.addAction("Connect to pwntools").triggered.connect(self.prepare_debug_ui)
+		self.menu = menu_bar.addMenu(PLUGNAME)
+		self.menu.addAction("Connect to pwntools").triggered.connect(self.prepare_debug_ui)
 		return idaapi.PLUGIN_KEEP
 
 	def term(self):
-		idaapi.msg("[%s] terminated" % (PLUGNAME))
-	
+		idaapi.msg("[%s] terminated\n" % (PLUGNAME))
+		self.menu.deleteLater()
+		
 	def run(self, arg):
 		prepare_debug_noui()
 

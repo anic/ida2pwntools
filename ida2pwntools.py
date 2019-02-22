@@ -1,4 +1,12 @@
 # -*- coding:utf-8 -*-
+
+import idc
+import idaapi
+import ida_nalt
+import ida_idd
+import ida_dbg
+import ida_kernwin
+
 import os.path
 import time
 	
@@ -7,96 +15,82 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 
-
 PLUGNAME = "Ida2pwntools"
 
-class MyThread(QThread):  
-  
+
+class MainCallable(object):
+	def __init__(self, handler):
+		self.handler = handler
+	def __call__(self):
+		return self.handler()
+
+
+class WaitThread(QThread):
 	sinOut = pyqtSignal(str)  
 	sinOutEnd = pyqtSignal(str)
   
-	def __init__(self,parent=None):  
-		super(MyThread,self).__init__(parent)  
-  
-		self.identity = None  
-  
-	def setIdentity(self,text):  
-		self.identity = text  
-  
-	def setVal(self,val):  
-		self.times = int(val)  
+	def __init__(self, parent=None):
+		super(WaitThread,self).__init__(parent)
+		self.filename = ida_nalt.get_root_filename()
+		self.target_pid = -1
 
 	def run(self):  
-		# while self.times > 0 and self.identity:  
-			# ##发射信号  
-			# self.sinOut.emit(self.identity+" "+str(self.times))  
-			# self.times -= 1
-			# time.sleep(1)
 		self.prepare_debug()
-		self.sinOutEnd.emit('start debug')
+		self.sinOutEnd.emit("start debug (PID: %d)" % self.target_pid)
 		
 	def prepare_debug(self):
+		def get_processes_list():
+			self.pis = ida_idd.procinfo_vec_t()
+			ida_dbg.get_processes(self.pis)
+			return 1
+
 		c = 0
-		global target_id
-		#目标pid
-		target_id = -1
-		
 		found_pid = False
 		while not found_pid:
-			
-			#获取程序名称
-			filename = ida_nalt.get_input_file_path()
-			#or use ida_nalt.get_root_filename()
-			
-			#查找是否有该名称的进程
-			c = (c + 1)%5
-			self.sinOut.emit('finding process: [%s]'%filename+('.'*c).ljust(5," "))
+			c = (c+1) % 5
+			self.sinOut.emit("finding process: [%s]" % self.filename+('.' * c).ljust(5, " "))
 
-			#获取当前进程列表
-			pis = ida_idd.procinfo_vec_t()
-			cnt = ida_dbg.get_processes(pis)
-			for i in range(cnt):
-				proc = pis[i]
+			ida_kernwin.execute_sync(MainCallable(get_processes_list), \
+				ida_kernwin.MFF_FAST)
+
+			for proc in self.pis:
 				proc_name = proc.name.split(" ")[1]
 				idx = proc_name.rfind("/")
-				if idx!=-1:
+
+				if idx != -1:
 					proc_name = proc_name[idx+1:]
 				
-				if filename == proc_name:
-					target_id = proc.pid
-					found_pid = True #跳出大循环
+				if self.filename == proc_name:
+					self.target_pid = proc.pid
+					found_pid = True
 					break
 
 			if not found_pid:
 				self.sleep(1)
 
 
-				
-class PushButton(QDialog):
+class WaitDialog(QDialog):
 	def __init__(self):
-		super(PushButton,self).__init__()
+		super(WaitDialog,self).__init__()
 		self.initUI()
-		
-		self.thread = MyThread()  
-		# self.thread.setIdentity("thread1")  
-		# self.thread.setVal(5)
+		self.thread = WaitThread()
 		self.thread.sinOut.connect(self.outText)
 		self.thread.sinOutEnd.connect(self.start_debug)
 		
-		##执行线程的run方法
-		
-	
-	def outText(self,text):  
+	def outText(self, text):
 		self.l2.setText(text)
 		
 	def close_debug(self):
 		self.thread.terminate()
 		self.hide()
+
+	def get_target_pid(self):
+		return self.thread.target_pid
 	
-	def start_debug(self,text):
+	def start_debug(self, text):
+		idaapi.msg("[%s] %s\n" % (PLUGNAME, text))
 		self.hide()
-		
-		
+
 	def initUI(self):
 		self.setWindowTitle(PLUGNAME)
 		self.setGeometry(400,400,300,260)
@@ -109,69 +103,44 @@ class PushButton(QDialog):
 		vbox.addWidget(self.l2)
 		
 		self.closeButton = QPushButton()
-		self.closeButton.setText("Stop Waiting")		  #text
-		self.closeButton.setShortcut('Ctrl+D')  #shortcut key
+		self.closeButton.setText("Stop Waiting")
+		self.closeButton.setShortcut('Ctrl+D')
 		self.closeButton.clicked.connect(self.close_debug)
-		self.closeButton.setToolTip("Stop Waiting") #Tool tip
+		self.closeButton.setToolTip("Stop Waiting")
 		self.closeButton.resize(200,100)
 		vbox.addWidget(self.closeButton)
 		
 		self.setLayout(vbox)
 
-def prepare_debug_ui():
-	global ex
-	global target_id
-	target_id = -1
-		
+
+def prepare_debug_noui():
+	target_pid = -1
 	idaapi.msg("[%s] waiting...\n" % (PLUGNAME))
-	ex.thread.start()
-	ex.exec_()
 	
+	filename = ida_nalt.get_root_filename()
+	pis = ida_idd.procinfo_vec_t()
+	ida_dbg.get_processes(pis)
+
+	for proc in pis:
+		proc_name = proc.name.split(" ")[1]
+		idx = proc_name.rfind("/")
+
+		if idx != -1:
+			proc_name = proc_name[idx+1:]
+
+		if filename == proc_name:
+			target_pid = proc.pid
+			break
 	
-	#开始调试
-	if (target_id != -1):
-		idaapi.msg("[%s] start debug\n" % (PLUGNAME))
-		ida_dbg.attach_process(target_id,-1)
-		GetDebuggerEvent(WFNE_SUSP, -1)
-		#继续调试
+	if target_pid != -1:
+		idaapi.msg("[%s] start debug (PID: %d)\n" % (PLUGNAME, target_pid))
+		ida_dbg.attach_process(target_pid, -1)
+		idc.GetDebuggerEvent(idc.WFNE_SUSP, -1)
 		ida_dbg.continue_process()
 	else:
 		idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
 
-def prepare_debug_noui():
-	global target_id
-	target_id = -1
-		
-	idaapi.msg("[%s] waiting...\n" % (PLUGNAME))
-	
-	#获取程序名称
-	filename = ida_nalt.get_input_file_path()
-	#or use ida_nalt.get_root_filename()
-	
-	#获取当前进程列表
-	pis = ida_idd.procinfo_vec_t()
-	cnt = ida_dbg.get_processes(pis)
-	for i in range(cnt):
-		proc = pis[i]
-		proc_name = proc.name.split(" ")[1]
-		idx = proc_name.rfind("/")
-		if idx!=-1:
-			proc_name = proc_name[idx+1:]
-		
-		if filename == proc_name:
-			target_id = proc.pid
-			break
-	
-	#开始调试
-	if (target_id != -1):
-		idaapi.msg("[%s] start debug\n" % (PLUGNAME))
-		ida_dbg.attach_process(target_id,-1)
-		GetDebuggerEvent(WFNE_SUSP, -1)
-		#继续调试
-		ida_dbg.continue_process()
-	else:
-		idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
-		
+
 class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 	comment = ""
 	help = "help"
@@ -179,13 +148,24 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 	wanted_hotkey = "f12"
 	flags = idaapi.PLUGIN_KEEP
 	
-	def load_configuration(self):
-		pass
+	def prepare_debug_ui(self):
+		wd = WaitDialog()
+		idaapi.msg("[%s] waiting...\n" % (PLUGNAME))
+		wd.thread.start()
+		wd.exec_()
+
+		target_pid = wd.get_target_pid()
+		if target_pid != -1:
+			ida_dbg.attach_process(target_pid,-1)
+			idc.GetDebuggerEvent(idc.WFNE_SUSP, -1)
+			ida_dbg.continue_process()
+		else:
+			idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
 
 	def init(self):
 		menu_bar = next(i for i in QtWidgets.qApp.allWidgets() if isinstance(i, QtWidgets.QMenuBar))
 		menu = menu_bar.addMenu(PLUGNAME)
-		menu.addAction("Connect to pwntools").triggered.connect(prepare_debug_ui)
+		menu.addAction("Connect to pwntools").triggered.connect(self.prepare_debug_ui)
 		return idaapi.PLUGIN_KEEP
 
 	def term(self):
@@ -193,10 +173,8 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 	
 	def run(self, arg):
 		prepare_debug_noui()
-				
-# register IDA plugin
+
+
 def PLUGIN_ENTRY():
 	return IDA_Pwntools_Plugin_t()
 
-ex = PushButton()
-target_id = -1

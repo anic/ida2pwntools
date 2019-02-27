@@ -1,21 +1,18 @@
 # -*- coding:utf-8 -*-
 
-import idc
 import idaapi
 import ida_nalt
 import ida_idd
 import ida_dbg
 import ida_kernwin
 
-import os.path
-import time
-	
 from PyQt5 import QtGui, QtCore, QtWidgets
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 
 PLUGNAME = "Ida2pwntools"
+WAIT_TIME_NO_UI = 60 # seconds
 
 
 class MainCallable(object):
@@ -113,32 +110,52 @@ class WaitDialog(QDialog):
 		self.setLayout(vbox)
 
 
-def prepare_debug_noui():
-	target_pid = -1
-	idaapi.msg("[%s] waiting...\n" % (PLUGNAME))
-	
-	filename = ida_nalt.get_root_filename()
-	pis = ida_idd.procinfo_vec_t()
-	ida_dbg.get_processes(pis)
+class timer_debug_noui_t(object):
+	def __init__(self):
+		self.interval = 1000 # 1 second
+		self.obj = idaapi.register_timer(self.interval, self)
+		if self.obj is None:
+			raise RuntimeError("Failed to register timer")
+		self.times = WAIT_TIME_NO_UI
 
-	for proc in pis:
-		proc_name = proc.name.split(" ")[1]
-		idx = proc_name.rfind("/")
+	def __call__(self):
+		target_pid = -1
 
-		if idx != -1:
-			proc_name = proc_name[idx+1:]
+		if idaapi.is_debugger_on():
+			idaapi.msg("[%s] the debugger is currently running\n" % PLUGNAME)
+			return -1
 
-		if filename == proc_name:
-			target_pid = proc.pid
-			break
-	
-	if target_pid != -1:
-		idaapi.msg("[%s] start debug (PID: %d)\n" % (PLUGNAME, target_pid))
-		ida_dbg.attach_process(target_pid, -1)
-		idc.GetDebuggerEvent(idc.WFNE_SUSP, -1)
-		ida_dbg.continue_process()
-	else:
-		idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
+		if not self.times%5:
+			idaapi.msg("[%s] waiting for the process (%ds left)...\n" % \
+				(PLUGNAME, self.times))
+
+		filename = ida_nalt.get_root_filename()
+		pis = ida_idd.procinfo_vec_t()
+		ida_dbg.get_processes(pis)
+
+		for proc in pis:
+			proc_name = proc.name.split(" ")[1]
+			idx = proc_name.rfind("/")
+
+			if idx != -1:
+				proc_name = proc_name[idx+1:]
+
+			if filename == proc_name:
+				target_pid = proc.pid
+				break
+
+		if target_pid != -1:
+			idaapi.msg("[%s] found. start debug (PID: %d)\n" % (PLUGNAME, target_pid))
+			ida_dbg.attach_process(target_pid, -1)
+			ida_dbg.wait_for_next_event(ida_dbg.WFNE_SUSP, -1)
+			ida_dbg.continue_process()
+			return -1
+
+		self.times -= 1
+		return -1 if self.times == 0 else self.interval
+
+	def __del__(self):
+		print("[%s] Timer disposed" % PLUGNAME)
 
 
 class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
@@ -149,6 +166,10 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 	flags = idaapi.PLUGIN_KEEP
 	
 	def prepare_debug_ui(self):
+		if idaapi.is_debugger_on():
+			idaapi.warning("[%s] the debugger is currently running" % PLUGNAME)
+			return
+
 		wd = WaitDialog()
 		idaapi.msg("[%s] waiting...\n" % (PLUGNAME))
 		wd.thread.start()
@@ -157,7 +178,7 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 		target_pid = wd.get_target_pid()
 		if target_pid != -1:
 			ida_dbg.attach_process(target_pid,-1)
-			idc.GetDebuggerEvent(idc.WFNE_SUSP, -1)
+			ida_dbg.wait_for_next_event(ida_dbg.WFNE_SUSP, -1)
 			ida_dbg.continue_process()
 		else:
 			idaapi.msg("[%s] exit waiting\n" % (PLUGNAME))
@@ -173,7 +194,7 @@ class IDA_Pwntools_Plugin_t(idaapi.plugin_t):
 		self.menu.deleteLater()
 		
 	def run(self, arg):
-		prepare_debug_noui()
+		timer_debug_noui_t()
 
 
 def PLUGIN_ENTRY():

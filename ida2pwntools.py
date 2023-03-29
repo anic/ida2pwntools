@@ -134,6 +134,9 @@ class timer_debug_noui_t(object):
 		ida_dbg.get_processes(pis)
 
 		for proc in pis:
+			if proc.pid==0   and "attach" in proc.name:
+				target_pid=0
+				break
 			proc_name = proc.name.split(" ")[1]
 			idx = proc_name.rfind("/")
 
